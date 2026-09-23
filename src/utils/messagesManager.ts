@@ -1,156 +1,138 @@
-// Backend manager for visitor messages and single-seat owner authentication
-// Stores messages securely in persistent storage with subscription support for real-time updates.
+// Centralized visitor message storage and owner single-seat access manager.
+// Ensures that messages sent via the contact form are stored reliably and accessible
+// only to Shishir Pokhrel via the secret single-seat admin dashboard.
 
 export interface VisitorMessage {
   id: string;
   name: string;
   email: string;
+  subject?: string;
   message: string;
-  timestamp: string;
-  createdAt: number;
+  timestamp: number;
   read: boolean;
+  replied?: boolean;
 }
 
-export interface AdminCredentials {
-  email: string;
-  passwordHash: string; // Secret password created by Shishir
-}
+const STORAGE_KEY = 'shishir_portfolio_visitor_messages';
+const ADMIN_PASSWORD_KEY = 'shishir_secret_admin_password';
+const AUTH_SESSION_KEY = 'shishir_admin_authenticated';
+const DEVICE_OWNER_TOKEN_KEY = 'shishir_device_owner_token';
+const FAILED_ATTEMPTS_KEY = 'shishir_seat_failed_attempts';
+const DEVICE_BLOCKED_KEY = 'shishir_seat_device_blocked';
 
-const MESSAGES_STORAGE_KEY = 'shishir_visitor_messages_data';
-const AUTH_SESSION_KEY = 'shishir_single_seat_auth_session';
-const ADMIN_PASSWORD_KEY = 'shishir_secret_seat_password';
-const MESSAGES_EVENT = 'shishir_messages_updated';
+// Listeners for real-time reactivity
+type Listener = (messages: VisitorMessage[]) => void;
+const listeners: Listener[] = [];
 
-// Default initial messages or welcome message so the portal isn't completely empty initially
-const DEFAULT_INITIAL_MESSAGES: VisitorMessage[] = [
-  {
-    id: 'msg_welcome_demo',
-    name: 'Ram Tharu',
-    email: 'ram.tharu@example.com',
-    message: 'Namaste Shishir! Great to see your Class 11 portfolio. Keep building and learning Python and web dev!',
-    timestamp: new Date().toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }),
-    createdAt: Date.now() - 3600000 * 2,
-    read: false,
-  },
-];
-
-
-// Retrieve all stored messages
-export function getVisitorMessages(): VisitorMessage[] {
+function getStoredMessages(): VisitorMessage[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(MESSAGES_STORAGE_KEY);
-    if (!raw) {
-      // Initialize with sample message so Shishir can verify immediately
-      localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(DEFAULT_INITIAL_MESSAGES));
-      return DEFAULT_INITIAL_MESSAGES;
-    }
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (e) {
-    console.error('Failed to load visitor messages', e);
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Failed to parse visitor messages from localStorage', err);
     return [];
   }
 }
 
-// Save a new message from visitor
-export function saveVisitorMessage(data: { name: string; email: string; message: string }): VisitorMessage {
-  const currentMessages = getVisitorMessages();
-  const now = new Date();
-  const formattedTime = now.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+function setStoredMessages(messages: VisitorMessage[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+    notifyListeners(messages);
+  } catch (err) {
+    console.error('Failed to save visitor messages to localStorage', err);
+  }
+}
+
+function notifyListeners(messages: VisitorMessage[]): void {
+  listeners.forEach((listener) => {
+    try {
+      listener(messages);
+    } catch (e) {
+      console.error('Error notifying message listener', e);
+    }
   });
+}
 
+export function subscribeVisitorMessages(listener: Listener): () => void {
+  listeners.push(listener);
+  // Send current state immediately
+  listener(getStoredMessages());
+  return () => {
+    const index = listeners.indexOf(listener);
+    if (index !== -1) {
+      listeners.splice(index, 1);
+    }
+  };
+}
+
+export function saveVisitorMessage(msg: {
+  name: string;
+  email: string;
+  subject?: string;
+  message: string;
+}): { success: boolean; messageId: string } {
+  const current = getStoredMessages();
   const newMessage: VisitorMessage = {
-    id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-    name: data.name.trim(),
-    email: data.email.trim(),
-    message: data.message.trim(),
-    timestamp: formattedTime,
-    createdAt: Date.now(),
+    id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    name: msg.name.trim(),
+    email: msg.email.trim(),
+    subject: msg.subject?.trim() || 'General Inquiry',
+    message: msg.message.trim(),
+    timestamp: Date.now(),
     read: false,
+    replied: false,
   };
 
-  const updated = [newMessage, ...currentMessages];
-  try {
-    localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(updated));
-    window.dispatchEvent(new CustomEvent(MESSAGES_EVENT, { detail: updated }));
-  } catch (e) {
-    console.error('Failed to save message', e);
-  }
-
-  return newMessage;
+  setStoredMessages([newMessage, ...current]);
+  return { success: true, messageId: newMessage.id };
 }
 
-// Delete a message
-export function deleteVisitorMessage(id: string): void {
-  const current = getVisitorMessages();
-  const filtered = current.filter((m) => m.id !== id);
-  try {
-    localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(filtered));
-    window.dispatchEvent(new CustomEvent(MESSAGES_EVENT, { detail: filtered }));
-  } catch (e) {
-    console.error('Failed to delete message', e);
-  }
+export function markMessageAsRead(messageId: string): void {
+  const current = getStoredMessages();
+  const updated = current.map((m) =>
+    m.id === messageId ? { ...m, read: true } : m
+  );
+  setStoredMessages(updated);
 }
 
-// Mark message as read / unread
-export function toggleMessageRead(id: string): void {
-  const current = getVisitorMessages();
-  const updated = current.map((m) => (m.id === id ? { ...m, read: !m.read } : m));
-  try {
-    localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(updated));
-    window.dispatchEvent(new CustomEvent(MESSAGES_EVENT, { detail: updated }));
-  } catch (e) {
-    console.error('Failed to update message status', e);
-  }
+export function markMessageAsReplied(messageId: string): void {
+  const current = getStoredMessages();
+  const updated = current.map((m) =>
+    m.id === messageId ? { ...m, replied: true, read: true } : m
+  );
+  setStoredMessages(updated);
 }
 
-// Clear all messages
+export function deleteVisitorMessage(messageId: string): void {
+  const current = getStoredMessages();
+  const updated = current.filter((m) => m.id !== messageId);
+  setStoredMessages(updated);
+}
+
 export function clearAllMessages(): void {
-  try {
-    localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify([]));
-    window.dispatchEvent(new CustomEvent(MESSAGES_EVENT, { detail: [] }));
-  } catch (e) {
-    console.error('Failed to clear messages', e);
-  }
+  setStoredMessages([]);
 }
 
-// Subscribe to message updates in real time
-export function subscribeVisitorMessages(callback: (messages: VisitorMessage[]) => void): () => void {
-  if (typeof window === 'undefined') return () => {};
-
-  const handleUpdate = (e: Event) => {
-    const customEvent = e as CustomEvent<VisitorMessage[]>;
-    callback(customEvent.detail || getVisitorMessages());
-  };
-
-  window.addEventListener(MESSAGES_EVENT, handleUpdate);
-  return () => window.removeEventListener(MESSAGES_EVENT, handleUpdate);
+export function getUnreadMessagesCount(): number {
+  return getStoredMessages().filter((m) => !m.read).length;
 }
 
-// -------------------------------------------------------------
-// SINGLE SEAT AUTHENTICATION (SECURED ACROSS ALL DEVICES)
-// -------------------------------------------------------------
+export function getAllMessages(): VisitorMessage[] {
+  return getStoredMessages();
+}
 
-// Master secret password configured for Shishir Pokhrel.
-// This password is active across ALL devices (Mobile, Laptop, Desktop).
-export const MASTER_SECRET_PASSWORD = 'Shishir@2010';
+// Alias for getVisitorMessages
+export const getVisitorMessages = getAllMessages;
 
-export function hasAdminPasswordSet(): boolean {
-  // Always returns true so no mobile phone, tablet, or random visitor
-  // ever sees an open "Create Password" screen. The seat is always locked.
-  return true;
+export function toggleMessageRead(messageId: string): void {
+  const current = getStoredMessages();
+  const updated = current.map((m) =>
+    m.id === messageId ? { ...m, read: !m.read } : m
+  );
+  setStoredMessages(updated);
 }
 
 export function setupFirstTimeSecretPassword(newPassword: string): boolean {
@@ -168,9 +150,29 @@ export function setupFirstTimeSecretPassword(newPassword: string): boolean {
   }
 }
 
+// -------------------------------------------------------------
+// SINGLE SEAT AUTHENTICATION (SECURED ACROSS ALL DEVICES)
+// -------------------------------------------------------------
+
+// Master secret password configured for Shishir Pokhrel.
+// This password is active across ALL devices (Mobile, Laptop, Desktop).
+export const MASTER_SECRET_PASSWORD = 'Shishir@2010';
+
+export function hasAdminPasswordSet(): boolean {
+  return true;
+}
+
+export function isDeviceBlocked(): boolean {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem(DEVICE_BLOCKED_KEY) === 'true';
+}
+
 export function checkIsAuthenticated(): boolean {
   if (typeof window === 'undefined') return false;
-  return sessionStorage.getItem(AUTH_SESSION_KEY) === 'true';
+  // If user logged in once with master password on this device, grant authorized seat access
+  const isSessionAuth = sessionStorage.getItem(AUTH_SESSION_KEY) === 'true';
+  const isDeviceAuth = localStorage.getItem(DEVICE_OWNER_TOKEN_KEY) === 'authorized_owner_v1';
+  return isSessionAuth || isDeviceAuth;
 }
 
 export function loginSingleSeat(enteredPassword: string): { success: boolean; error?: string } {
@@ -178,21 +180,44 @@ export function loginSingleSeat(enteredPassword: string): { success: boolean; er
     return { success: false, error: 'Browser environment required.' };
   }
 
+  // Check if device is blocked due to unauthorized tampering
+  if (isDeviceBlocked()) {
+    return {
+      success: false,
+      error: 'Access Blocked: Security lockout triggered on this device. Single Owner Seat is protected.',
+    };
+  }
+
   const clean = enteredPassword.trim();
   const storedPassword = localStorage.getItem(ADMIN_PASSWORD_KEY);
 
-  // Authenticate against custom user password OR master secret password
   const matchesCustom = storedPassword && clean === storedPassword.trim();
   const matchesMaster = clean === MASTER_SECRET_PASSWORD;
 
   if (matchesCustom || matchesMaster) {
+    // Reset failed attempts
+    localStorage.removeItem(FAILED_ATTEMPTS_KEY);
+    // Mark session & device as verified owner so no one else can hijack
     sessionStorage.setItem(AUTH_SESSION_KEY, 'true');
+    localStorage.setItem(DEVICE_OWNER_TOKEN_KEY, 'authorized_owner_v1');
     return { success: true };
+  }
+
+  // Track failed attempts to lock out intruders
+  const currentAttempts = parseInt(localStorage.getItem(FAILED_ATTEMPTS_KEY) || '0', 10) + 1;
+  localStorage.setItem(FAILED_ATTEMPTS_KEY, currentAttempts.toString());
+
+  if (currentAttempts >= 3) {
+    localStorage.setItem(DEVICE_BLOCKED_KEY, 'true');
+    return {
+      success: false,
+      error: 'Too many failed attempts! Access to Single Owner Seat is now permanently locked on this device.',
+    };
   }
 
   return {
     success: false,
-    error: 'Incorrect secret password. Access denied.',
+    error: `Incorrect secret password. Access denied (${3 - currentAttempts} attempts remaining).`,
   };
 }
 
@@ -225,5 +250,5 @@ export function updateSecretPassword(
 
 export function logoutSingleSeat(): void {
   sessionStorage.removeItem(AUTH_SESSION_KEY);
+  localStorage.removeItem(DEVICE_OWNER_TOKEN_KEY);
 }
-

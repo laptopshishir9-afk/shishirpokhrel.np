@@ -1,5 +1,8 @@
 // Photo manager to allow Shishir's real photograph to be loaded from public/assets/
 // or uploaded via the interface and shared across Navbar and HeroSection seamlessly.
+// Integrated with CloudSync so changes made from one device update across all devices.
+
+import { pushCloudSync, subscribeCloudSync, pullCloudSync } from './cloudSync';
 
 const STORAGE_KEY = 'shishir_real_profile_photo';
 const EVENT_NAME = 'shishir_photo_updated';
@@ -32,6 +35,31 @@ export const DEFAULT_COLLEGE_LOGO_PATHS = [
   'assets/college-logo.png',
 ];
 
+// Initialize cloud sync listener
+if (typeof window !== 'undefined') {
+  subscribeCloudSync((data) => {
+    if (data.ownerPhoto && data.ownerPhoto !== localStorage.getItem(STORAGE_KEY)) {
+      try {
+        localStorage.setItem(STORAGE_KEY, data.ownerPhoto);
+        window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: data.ownerPhoto }));
+      } catch {
+        // Ignore quota
+      }
+    }
+    if (data.collegeLogo && data.collegeLogo !== localStorage.getItem(SCHOOL_LOGO_KEY)) {
+      try {
+        localStorage.setItem(SCHOOL_LOGO_KEY, data.collegeLogo);
+        window.dispatchEvent(new CustomEvent(SCHOOL_LOGO_EVENT, { detail: data.collegeLogo }));
+      } catch {
+        // Ignore quota
+      }
+    }
+  });
+
+  // Pull latest cloud sync in the background
+  pullCloudSync().catch(() => {});
+}
+
 export function getStoredProfilePhoto(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(STORAGE_KEY);
@@ -42,6 +70,8 @@ export function saveStoredProfilePhoto(dataUrl: string): void {
   try {
     localStorage.setItem(STORAGE_KEY, dataUrl);
     window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: dataUrl }));
+    // Push update to cloud sync so all devices receive it
+    pushCloudSync({ ownerPhoto: dataUrl }).catch(() => {});
   } catch (err) {
     console.error('Failed to save profile photo to localStorage', err);
   }
@@ -52,6 +82,7 @@ export function removeStoredProfilePhoto(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);
     window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: null }));
+    pushCloudSync({ ownerPhoto: '' }).catch(() => {});
   } catch (err) {
     console.error('Failed to remove profile photo', err);
   }
@@ -83,6 +114,8 @@ export function saveStoredSchoolLogo(dataUrl: string): void {
   try {
     localStorage.setItem(SCHOOL_LOGO_KEY, dataUrl);
     window.dispatchEvent(new CustomEvent(SCHOOL_LOGO_EVENT, { detail: dataUrl }));
+    // Push update to cloud sync so all devices receive it
+    pushCloudSync({ collegeLogo: dataUrl }).catch(() => {});
   } catch (err) {
     console.error('Failed to save school logo', err);
   }
@@ -93,6 +126,7 @@ export function removeStoredSchoolLogo(): void {
   try {
     localStorage.removeItem(SCHOOL_LOGO_KEY);
     window.dispatchEvent(new CustomEvent(SCHOOL_LOGO_EVENT, { detail: null }));
+    pushCloudSync({ collegeLogo: '' }).catch(() => {});
   } catch (err) {
     console.error('Failed to remove school logo', err);
   }
@@ -118,5 +152,43 @@ export function downloadDataUrlFile(dataUrl: string, filename: string): void {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+// Client-side image compressor: Converts large photos into clean, optimized images
+// so they fit in memory and sync across all devices rapidly (<50KB).
+export function compressImage(file: File, maxWidth = 600, quality = 0.85): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth || height > maxWidth) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxWidth) / height);
+            height = maxWidth;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(e.target?.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 

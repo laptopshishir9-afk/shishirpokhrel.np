@@ -102,6 +102,7 @@ export default function App() {
         currentPage={currentPage}
         onNavigateHome={navigateToHome}
         onNavigateAboutMe={navigateToAboutMe}
+        onNavigateAdmin={navigateToAdmin}
       />
 
       {currentPage === 'about-me' ? (

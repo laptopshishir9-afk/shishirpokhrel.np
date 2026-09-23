@@ -35,6 +35,7 @@ import {
   loginSingleSeat,
   logoutSingleSeat,
   updateSecretPassword,
+  isDeviceBlocked,
 } from '../utils/messagesManager';
 import {
   saveStoredProfilePhoto,
@@ -46,6 +47,7 @@ import {
   subscribeProfilePhoto,
   DEFAULT_PHOTO_PATHS,
   downloadDataUrlFile,
+  compressImage,
 } from '../utils/photoManager';
 
 interface OwnerBackendSectionProps {
@@ -176,20 +178,18 @@ export const OwnerBackendSection: React.FC<OwnerBackendSectionProps> = ({ onBack
   };
 
   // 5. School Logo Upload (Only Shishir in this seat)
-  const handleSchoolLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSchoolLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          const dataUrl = event.target.result as string;
-          saveStoredSchoolLogo(dataUrl);
-          setSchoolLogo(dataUrl);
-          setLogoSavedSuccess(true);
-          setTimeout(() => setLogoSavedSuccess(false), 3500);
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 400, 0.9);
+        saveStoredSchoolLogo(compressed);
+        setSchoolLogo(compressed);
+        setLogoSavedSuccess(true);
+        setTimeout(() => setLogoSavedSuccess(false), 3500);
+      } catch (err) {
+        console.error('Error compressing school logo', err);
+      }
     }
   };
 
@@ -201,20 +201,18 @@ export const OwnerBackendSection: React.FC<OwnerBackendSectionProps> = ({ onBack
   };
 
   // 6. Owner Photo Upload (Only Shishir in this seat)
-  const handleOwnerPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleOwnerPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          const dataUrl = event.target.result as string;
-          saveStoredProfilePhoto(dataUrl);
-          setOwnerPhoto(dataUrl);
-          setPhotoSavedSuccess(true);
-          setTimeout(() => setPhotoSavedSuccess(false), 3500);
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 600, 0.88);
+        saveStoredProfilePhoto(compressed);
+        setOwnerPhoto(compressed);
+        setPhotoSavedSuccess(true);
+        setTimeout(() => setPhotoSavedSuccess(false), 3500);
+      } catch (err) {
+        console.error('Error compressing profile photo', err);
+      }
     }
   };
 

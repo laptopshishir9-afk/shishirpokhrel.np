@@ -3,67 +3,83 @@ import React, { useState, useEffect } from 'react';
 interface TypingHeadingProps {
   prefix?: string;
   name?: string;
-  durationMs?: number;
+  typeDurationMs?: number;
+  pauseDurationMs?: number;
 }
 
 export const TypingHeading: React.FC<TypingHeadingProps> = ({
   prefix = "Hi, I'm ",
   name = "Shishir Pokhrel",
-  durationMs = 1000,
+  typeDurationMs = 1000,
+  pauseDurationMs = 1200,
 }) => {
   const fullText = `${prefix}${name}`;
-  const [displayedCount, setDisplayedCount] = useState<number>(0);
-  const [isFinished, setIsFinished] = useState<boolean>(false);
+  const prefixLength = prefix.length;
+  const totalLength = fullText.length;
+
+  const [charIndex, setCharIndex] = useState<number>(0);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   useEffect(() => {
-    // Total duration is exactly durationMs (1000ms = 1 second)
-    const totalChars = fullText.length;
-    const intervalTime = Math.max(20, Math.floor(durationMs / totalChars));
+    let timeout: NodeJS.Timeout;
 
-    let current = 0;
-    const timer = setInterval(() => {
-      current += 1;
-      if (current <= totalChars) {
-        setDisplayedCount(current);
+    if (!isDeleting) {
+      // TYPING PHASE: Each character takes (typeDurationMs / totalLength) ~ 40ms
+      if (charIndex < totalLength) {
+        const stepTime = Math.max(25, Math.floor(typeDurationMs / totalLength));
+        timeout = setTimeout(() => {
+          setCharIndex((prev) => prev + 1);
+        }, stepTime);
       } else {
-        clearInterval(timer);
-        setIsFinished(true);
+        // Finished typing full text: Pause for 1.2s before deleting/retyping
+        timeout = setTimeout(() => {
+          setIsDeleting(true);
+        }, pauseDurationMs);
       }
-    }, intervalTime);
+    } else {
+      // DELETING PHASE: Quick smooth erase over ~500ms
+      if (charIndex > 0) {
+        const deleteStep = Math.max(15, Math.floor(500 / totalLength));
+        timeout = setTimeout(() => {
+          setCharIndex((prev) => prev - 1);
+        }, deleteStep);
+      } else {
+        // Finished deleting: Pause 250ms then start typing again without stopping
+        timeout = setTimeout(() => {
+          setIsDeleting(false);
+        }, 250);
+      }
+    }
 
-    return () => clearInterval(timer);
-  }, [fullText, durationMs]);
+    return () => clearTimeout(timeout);
+  }, [charIndex, isDeleting, totalLength, typeDurationMs, pauseDurationMs]);
 
-  // Determine what part of prefix and name are typed
-  const prefixLength = prefix.length;
-  const typedPrefix = fullText.slice(0, Math.min(displayedCount, prefixLength));
-  const typedName = displayedCount > prefixLength ? fullText.slice(prefixLength, displayedCount) : '';
+  const typedPrefix = fullText.slice(0, Math.min(charIndex, prefixLength));
+  const typedName = charIndex > prefixLength ? fullText.slice(prefixLength, charIndex) : '';
 
   return (
     <h1
       id="hero-typing-name-heading"
-      className="font-display text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight text-blue-950 inline-flex flex-wrap items-center justify-center gap-x-2"
+      className="font-display text-3xl sm:text-5xl md:text-6xl font-black tracking-tight text-slate-900 inline-flex flex-wrap items-center justify-center gap-y-2 select-none"
     >
       {/* Prefix: "Hi, I'm " */}
-      <span>{typedPrefix}</span>
+      <span className="text-slate-900">{typedPrefix}</span>
 
-      {/* Highlighted Name: "Shishir Pokhrel" */}
+      {/* Highlighted Name: "Shishir Pokhrel" in bright yellow bubble matching screenshot */}
       {typedName.length > 0 && (
         <span
           id="highlighted-user-name"
-          className="relative inline-block px-3 py-0.5 rounded-2xl bg-amber-300 text-blue-950 border-b-4 border-amber-400 shadow-sm transition-all"
+          className="ml-2 inline-block px-3 py-0.5 sm:px-5 sm:py-1 rounded-2xl bg-amber-400 text-slate-950 font-black shadow-sm border border-amber-300 transition-all align-middle"
         >
           {typedName}
         </span>
       )}
 
-      {/* Typing cursor that blinks and fades after finishing */}
-      {!isFinished && (
-        <span
-          className="inline-block w-1 h-9 sm:h-12 bg-blue-700 ml-1 animate-pulse align-middle rounded-full"
-          aria-hidden="true"
-        />
-      )}
+      {/* Blinking Cursor - continuous and smooth */}
+      <span
+        className="inline-block w-1 h-7 sm:h-11 md:h-12 bg-blue-600 ml-1.5 animate-pulse rounded-full align-middle"
+        aria-hidden="true"
+      />
     </h1>
   );
 };
